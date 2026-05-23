@@ -8,21 +8,31 @@ import (
 )
 
 func TestWAL(t *testing.T) {
-	f, err := os.CreateTemp(".", "test.bin")
-	defer os.Remove(f.Name())
-
+	logFile, err := os.CreateTemp(".", "log.bin")
 	require.NoError(t, err)
+	defer os.Remove(logFile.Name())
 
-	log := NewLog(f)
-
-	n, offset, err := log.Append([]byte("Hello"))
+	indexFile, err := os.CreateTemp(".", "index.bin")
 	require.NoError(t, err)
+	defer os.Remove(indexFile.Name())
 
-	require.Equal(t, 8+5, n)
-	require.Equal(t, uint64(0), offset)
+	index := NewIndex(indexFile)
 
-	data, err := log.Read(int64(offset))
+	log := NewLog(logFile, index)
+
+	off, err := log.Append([]byte("Hello"))
 	require.NoError(t, err)
+	require.Equal(t, off, uint32(0))
 
-	require.Equal(t, data, []byte("Hello"))
+	off, err = log.Append([]byte("World"))
+	require.NoError(t, err)
+	require.Equal(t, off, uint32(1))
+
+	data, err := log.Read(0)
+	require.NoError(t, err)
+	require.Equal(t, []byte("Hello"), data)
+
+	data, err = log.Read(1)
+	require.NoError(t, err)
+	require.Equal(t, []byte("World"), data)
 }
