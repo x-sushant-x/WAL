@@ -70,5 +70,5 @@ func (wal *WALog) Read(offset int64) ([]byte, error) {
 		return nil, err
 	}
 
-	return data, nil
+	return data, err
 }
