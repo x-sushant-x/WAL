@@ -12,24 +12,24 @@ const lenWidth = 8
 
 var enc = binary.BigEndian
 
-type WALog struct {
+type logStore struct {
 	mu     sync.RWMutex
 	store  *os.File
 	buf    *bufio.Writer
 	size   uint64
-	index  *Index
+	index  *index
 	curOff uint32
 }
 
-func NewLog(store *os.File, index *Index) *WALog {
-	return &WALog{
+func NewLogStore(store *os.File, index *index) *logStore {
+	return &logStore{
 		store: store,
 		buf:   bufio.NewWriter(store),
 		index: index,
 	}
 }
 
-func (wal *WALog) Append(msg []byte) (off uint32, err error) {
+func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -65,7 +65,7 @@ func (wal *WALog) Append(msg []byte) (off uint32, err error) {
 	return
 }
 
-func (wal *WALog) Read(off int) ([]byte, error) {
+func (wal *logStore) Read(off int) ([]byte, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -93,4 +93,15 @@ func (wal *WALog) Read(off int) ([]byte, error) {
 	}
 
 	return data, err
+}
+
+func (s *logStore) Close() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if err := s.buf.Flush(); err != nil {
+		return err
+	}
+
+	return s.store.Close()
 }

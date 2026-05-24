@@ -1,3 +1,6 @@
+// index is NOT thread-safe.
+// All access must be synchronized by the caller (logStore).
+
 package log
 
 import (
@@ -5,7 +8,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"os"
-	"sync"
 )
 
 const (
@@ -16,20 +18,36 @@ const (
 
 var indexEnc = binary.BigEndian
 
-type Index struct {
-	f   *os.File
-	mu  sync.RWMutex
-	buf *bufio.Writer
+type index struct {
+	f    *os.File
+	buf  *bufio.Writer
+	size uint64
 }
 
-func NewIndex(f *os.File) *Index {
-	return &Index{
+func NewIndex(f *os.File) *index {
+	return &index{
 		f:   f,
 		buf: bufio.NewWriter(f),
 	}
 }
 
-func (i *Index) Write(off uint32, pos uint64) error {
+func (i *index) Name() string {
+	return i.f.Name()
+}
+
+func (i *index) Close() error {
+	if err := i.buf.Flush(); err != nil {
+		return err
+	}
+
+	if err := i.f.Close(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (i *index) Write(off uint32, pos uint64) error {
 	err := binary.Write(i.buf, indexEnc, uint32(off))
 	if err != nil {
 		return err
@@ -40,10 +58,12 @@ func (i *Index) Write(off uint32, pos uint64) error {
 		return err
 	}
 
+	i.size += totWidth
+
 	return err
 }
 
-func (i *Index) Read(off uint32) (pos uint64, err error) {
+func (i *index) Read(off uint32) (pos uint64, err error) {
 	if err := i.buf.Flush(); err != nil {
 		return 0, err
 	}

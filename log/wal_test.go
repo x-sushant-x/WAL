@@ -18,7 +18,7 @@ func TestWAL(t *testing.T) {
 
 	index := NewIndex(indexFile)
 
-	log := NewLog(logFile, index)
+	log := NewLogStore(logFile, index)
 
 	off, err := log.Append([]byte("Hello"))
 	require.NoError(t, err)
