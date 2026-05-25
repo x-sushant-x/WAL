@@ -1,3 +1,13 @@
+/*
+ * This code is responsible for writing data to log files in following format:
+ * [length][checksum][data]
+ *
+ * TODO:
+ * 1. Handle Partial Reads & Writes.
+ * 2. Handle error roleback.
+ * 3. If lenbuf is curroupted huge amount of memory can be allocated. Add some cap.
+ */
+
 package log
 
 import (
@@ -34,16 +44,32 @@ func NewLogStore(store *os.File, index *index) *logStore {
 	}
 }
 
+/*
+ * This function perform following steps:
+ * 1. Calculate message length and convert it into 8 byte big endian format.
+ * 2. Generate and store a checksum from the combination of msgLen + msg.
+ * 3. Store data into log file in following format: [length][checksum][data]
+ */
 func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
+	/*
+	 * pos tells the position at which current entry is being appended in log file.
+	 * This is later sent to index module which maintain the indexing of each entry for optimized lookup while reading.
+	 */
 	pos := wal.size
 
 	msgLen := uint64(len(msg))
 	lenBuf := make([]byte, lenWidth)
 	enc.PutUint64(lenBuf, msgLen)
 
+	/*
+	 * We are using CRC32 for checksum because:
+	 * 1. It is exactly designed for detecting corruption in streaming and storage systems.
+	 * 2. It is extremely fst.
+	 * 3. It take only 4 byte of space.
+	 */
 	crc := crc32.NewIEEE()
 	crc.Write(lenBuf)
 	crc.Write(msg)
@@ -83,6 +109,15 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 	return
 }
 
+/*
+ * This function perform following steps:
+ * 1. Flush data to make sure everything is written in disk before reading. Sometime data is buffered but not written in disk.
+ * 2. Ask index module for the position where data is stored in log file for a particular message offset.
+ * 3. Read the checksum.
+ * 4. Read the message.
+ * 5. Generate a checksum with length + message.
+ * 6. Compare if generated checksum and stored checksum is equal or not.
+ */
 func (wal *logStore) Read(off int) ([]byte, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
@@ -112,7 +147,6 @@ func (wal *logStore) Read(off int) ([]byte, error) {
 
 	expectedChecksum := enc.Uint32(checksumBuf)
 
-	// FIX: If lenbuf is curroupted below line can allocate huge amount of memory. Add some cap later.
 	dataLen := enc.Uint64(lenBuf)
 	data := make([]byte, dataLen)
 
