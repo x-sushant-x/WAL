@@ -28,20 +28,27 @@ const (
 var enc = binary.BigEndian
 
 type logStore struct {
-	mu     sync.RWMutex
-	store  *os.File
-	buf    *bufio.Writer
-	size   uint64
-	index  *index
-	curOff uint32
+	mu   sync.RWMutex
+	f    *os.File
+	buf  *bufio.Writer
+	size uint64
 }
 
-func NewLogStore(store *os.File, index *index) *logStore {
-	return &logStore{
-		store: store,
-		buf:   bufio.NewWriter(store),
-		index: index,
+func newLogStore(file *os.File) (*logStore, error) {
+	if file == nil {
+		return nil, errors.New("nil file for store")
 	}
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, errors.New("invalid file for store")
+	}
+
+	return &logStore{
+		f:    file,
+		buf:  bufio.NewWriter(file),
+		size: uint64(fileInfo.Size()),
+	}, nil
 }
 
 /*
@@ -50,7 +57,7 @@ func NewLogStore(store *os.File, index *index) *logStore {
  * 2. Generate and store a checksum from the combination of msgLen + msg.
  * 3. Store data into log file in following format: [length][checksum][data]
  */
-func (wal *logStore) Append(msg []byte) (off uint32, err error) {
+func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -58,7 +65,7 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 	 * pos tells the position at which current entry is being appended in log file.
 	 * This is later sent to index module which maintain the indexing of each entry for optimized lookup while reading.
 	 */
-	pos := wal.size
+	pos = wal.size
 
 	msgLen := uint64(len(msg))
 	lenBuf := make([]byte, lenWidth)
@@ -85,7 +92,7 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 		return
 	}
 
-	n, err := wal.buf.Write(msg)
+	n, err = wal.buf.Write(msg)
 	if err != nil {
 		return
 	}
@@ -97,14 +104,6 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 
 	totalBytesWritten := lenWidth + checksumWidth + len(msg)
 	wal.size += uint64(totalBytesWritten)
-
-	err = wal.index.Write(wal.curOff, pos)
-	if err != nil {
-		return
-	}
-
-	off = wal.curOff
-	wal.curOff = wal.curOff + 1
 
 	return
 }
@@ -118,7 +117,7 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
  * 5. Generate a checksum with length + message.
  * 6. Compare if generated checksum and stored checksum is equal or not.
  */
-func (wal *logStore) Read(off int) ([]byte, error) {
+func (wal *logStore) Read(posToRead uint64) ([]byte, error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -126,21 +125,16 @@ func (wal *logStore) Read(off int) ([]byte, error) {
 		return nil, err
 	}
 
-	posToRead, err := wal.index.Read(uint32(off))
-	if err != nil {
-		return nil, err
-	}
-
 	lenBuf := make([]byte, lenWidth)
 
-	_, err = wal.store.ReadAt(lenBuf, int64(posToRead))
+	_, err := wal.f.ReadAt(lenBuf, int64(posToRead))
 	if err != nil {
 		return nil, err
 	}
 
 	checksumBuf := make([]byte, checksumWidth)
 
-	_, err = wal.store.ReadAt(checksumBuf, lenWidth+int64(posToRead))
+	_, err = wal.f.ReadAt(checksumBuf, lenWidth+int64(posToRead))
 	if err != nil {
 		return nil, err
 	}
@@ -150,7 +144,7 @@ func (wal *logStore) Read(off int) ([]byte, error) {
 	dataLen := enc.Uint64(lenBuf)
 	data := make([]byte, dataLen)
 
-	_, err = wal.store.ReadAt(data, int64(posToRead)+lenWidth+checksumWidth)
+	_, err = wal.f.ReadAt(data, int64(posToRead)+lenWidth+checksumWidth)
 	if err != nil {
 		return nil, err
 	}
@@ -176,5 +170,5 @@ func (s *logStore) Close() error {
 		return err
 	}
 
-	return s.store.Close()
+	return s.f.Close()
 }

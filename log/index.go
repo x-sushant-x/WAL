@@ -5,9 +5,6 @@
  * Whenever a read request comes WAL can query index and index will give exact position where the requested message is stored.
  * This elimiate the need of traversing the whole log file.
  *
- * IMPORTANT - index is NOT thread-safe.
- * All access must be synchronized by the caller (logStore).
- *
  * TODO:
  * 1. Handle Partial Reads & Writes.
  * 2. Handle error roleback.
@@ -48,11 +45,21 @@ type index struct {
 	 */
 }
 
-func NewIndex(f *os.File) *index {
-	return &index{
-		f:   f,
-		buf: bufio.NewWriter(f),
+func newIndex(file *os.File) (*index, error) {
+	if file == nil {
+		return nil, errors.New("nil file for store")
 	}
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return nil, errors.New("invalid file for store")
+	}
+
+	return &index{
+		f:    file,
+		buf:  bufio.NewWriter(file),
+		size: uint64(fileInfo.Size()),
+	}, nil
 }
 
 func (i *index) Name() string {

@@ -12,7 +12,7 @@ func TestIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(f.Name())
 
-	i := NewIndex(f)
+	i := newIndex(f)
 
 	cases := []struct {
 		off uint32

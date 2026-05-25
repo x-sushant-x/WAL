@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWAL(t *testing.T) {
+func TestLogStore(t *testing.T) {
 	logFile, err := os.CreateTemp(".", "log.bin")
 	require.NoError(t, err)
 	// defer os.Remove(logFile.Name())
@@ -16,9 +16,9 @@ func TestWAL(t *testing.T) {
 	require.NoError(t, err)
 	// defer os.Remove(indexFile.Name())
 
-	index := NewIndex(indexFile)
+	index := newIndex(indexFile)
 
-	log := NewLogStore(logFile, index)
+	log := newLogStore(logFile, index)
 
 	off, err := log.Append([]byte("Hello"))
 	require.NoError(t, err)
