@@ -10,11 +10,11 @@ import (
 func TestWAL(t *testing.T) {
 	logFile, err := os.CreateTemp(".", "log.bin")
 	require.NoError(t, err)
-	defer os.Remove(logFile.Name())
+	// defer os.Remove(logFile.Name())
 
 	indexFile, err := os.CreateTemp(".", "index.bin")
 	require.NoError(t, err)
-	defer os.Remove(indexFile.Name())
+	// defer os.Remove(indexFile.Name())
 
 	index := NewIndex(indexFile)
 

@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"encoding/binary"
 	"errors"
+	"hash/crc32"
 	"os"
 	"sync"
 )
 
-const lenWidth = 8
+const (
+	lenWidth      = 8
+	checksumWidth = 4
+)
 
+// BigEndian is standard for network oriented applications
 var enc = binary.BigEndian
 
 type logStore struct {
@@ -33,11 +38,24 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
-	msgLen := len(msg)
 	pos := wal.size
 
-	err = binary.Write(wal.buf, enc, uint64(msgLen))
-	if err != nil {
+	msgLen := uint64(len(msg))
+	lenBuf := make([]byte, lenWidth)
+	enc.PutUint64(lenBuf, msgLen)
+
+	crc := crc32.NewIEEE()
+	crc.Write(lenBuf)
+	crc.Write(msg)
+	checksum := crc.Sum32()
+	checksumBuf := make([]byte, checksumWidth)
+	binary.BigEndian.PutUint32(checksumBuf, checksum)
+
+	if _, err = wal.buf.Write(lenBuf); err != nil {
+		return
+	}
+
+	if _, err = wal.buf.Write(checksumBuf); err != nil {
 		return
 	}
 
@@ -46,13 +64,13 @@ func (wal *logStore) Append(msg []byte) (off uint32, err error) {
 		return
 	}
 
-	if n != msgLen {
+	if uint64(n) != msgLen {
 		err = errors.New("unable to write to wal")
 		return
 	}
 
-	n += lenWidth
-	wal.size += uint64(n)
+	totalBytesWritten := lenWidth + checksumWidth + len(msg)
+	wal.size += uint64(totalBytesWritten)
 
 	err = wal.index.Write(wal.curOff, pos)
 	if err != nil {
@@ -78,18 +96,39 @@ func (wal *logStore) Read(off int) ([]byte, error) {
 		return nil, err
 	}
 
-	size := make([]byte, lenWidth)
+	lenBuf := make([]byte, lenWidth)
 
-	n, err := wal.store.ReadAt(size, int64(posToRead))
-	if err != nil || n < lenWidth {
+	_, err = wal.store.ReadAt(lenBuf, int64(posToRead))
+	if err != nil {
 		return nil, err
 	}
 
-	data := make([]byte, enc.Uint64(size))
+	checksumBuf := make([]byte, checksumWidth)
 
-	n, err = wal.store.ReadAt(data, int64(posToRead)+lenWidth)
+	_, err = wal.store.ReadAt(checksumBuf, lenWidth+int64(posToRead))
 	if err != nil {
 		return nil, err
+	}
+
+	expectedChecksum := enc.Uint32(checksumBuf)
+
+	// FIX: If lenbuf is curroupted below line can allocate huge amount of memory. Add some cap later.
+	dataLen := enc.Uint64(lenBuf)
+	data := make([]byte, dataLen)
+
+	_, err = wal.store.ReadAt(data, int64(posToRead)+lenWidth+checksumWidth)
+	if err != nil {
+		return nil, err
+	}
+
+	crc := crc32.NewIEEE()
+	crc.Write(lenBuf)
+	crc.Write(data)
+
+	actualChecksum := crc.Sum32()
+
+	if actualChecksum != expectedChecksum {
+		return nil, errors.New("corrupted WAL entry: checksum mismatch")
 	}
 
 	return data, err
