@@ -6,6 +6,8 @@ import (
 	"path"
 )
 
+const maxStoreBytes = 16 * 1024 * 1024 // 16MB
+
 type segment struct {
 	store            *logStore
 	index            *index
@@ -13,7 +15,7 @@ type segment struct {
 }
 
 func newSegment(baseOff uint64, dir string) (*segment, error) {
-	s := segment{
+	s := &segment{
 		baseOff: baseOff,
 	}
 
@@ -42,5 +44,53 @@ func newSegment(baseOff uint64, dir string) (*segment, error) {
 	s.index = index
 	s.store = store
 
-	// TODO - A lot of work pending here.
+	indexEntries := s.index.size / 12 // 12 is the size of each entry in index file
+	s.nextOff = s.baseOff + indexEntries
+
+	return s, nil
+}
+
+func (s *segment) Append(msg []byte) (offset uint64, err error) {
+	offset = s.nextOff
+
+	_, pos, err := s.store.Append(msg)
+	if err != nil {
+		return 0, err
+	}
+
+	relOff := uint32(offset - s.baseOff)
+
+	if err := s.index.Write(relOff, pos); err != nil {
+		return 0, err
+	}
+
+	s.nextOff++
+
+	return offset, nil
+}
+
+func (s *segment) Read(offset uint64) ([]byte, error) {
+	if offset < s.baseOff || offset >= s.nextOff {
+		return nil, fmt.Errorf("offset out of range")
+	}
+
+	relOff := uint32(offset - s.baseOff)
+
+	pos, err := s.index.Read(relOff)
+	if err != nil {
+		return nil, err
+	}
+
+	return s.store.Read(pos)
+}
+
+func (s *segment) IsMaxed() bool {
+	return s.store.size >= maxStoreBytes
+}
+
+func (s *segment) Close() error {
+	if err := s.index.Close(); err != nil {
+		return err
+	}
+	return s.store.Close()
 }
