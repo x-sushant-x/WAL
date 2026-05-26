@@ -6,7 +6,7 @@ import (
 	"path"
 )
 
-const maxStoreBytes = 16 * 1024 * 1024 // 16MB
+var maxStoreBytes = 16 * 1024 * 1024 // 16MB
 
 type segment struct {
 	store            *logStore
@@ -85,7 +85,7 @@ func (s *segment) Read(offset uint64) ([]byte, error) {
 }
 
 func (s *segment) IsMaxed() bool {
-	return s.store.size >= maxStoreBytes
+	return s.store.size >= uint64(maxStoreBytes)
 }
 
 func (s *segment) Close() error {
