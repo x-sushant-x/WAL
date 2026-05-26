@@ -12,7 +12,8 @@ func TestIndex(t *testing.T) {
 	require.NoError(t, err)
 	defer os.Remove(f.Name())
 
-	i := newIndex(f)
+	i, err := newIndex(f)
+	require.NoError(t, err)
 
 	cases := []struct {
 		off uint32
