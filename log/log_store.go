@@ -15,17 +15,22 @@ import (
 	"encoding/binary"
 	"errors"
 	"hash/crc32"
+	"io"
 	"os"
 	"sync"
 )
 
 const (
-	lenWidth      = 8
-	checksumWidth = 4
+	lenWidth       = 8
+	checksumWidth  = 4
+	messageMaxSize = 1000000 // Bytes
 )
 
-// BigEndian is standard for network oriented applications
-var enc = binary.BigEndian
+var (
+	// BigEndian is standard for network oriented applications
+	enc                       = binary.BigEndian
+	errMessageMaxSizeBreached = errors.New("message max size limit crossed")
+)
 
 type logStore struct {
 	mu   sync.RWMutex
@@ -58,6 +63,10 @@ func newLogStore(file *os.File) (*logStore, error) {
  * 3. Store data into log file in following format: [length][checksum][data]
  */
 func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
+	if len(msg) > messageMaxSize {
+		return 0, 0, errMessageMaxSizeBreached
+	}
+
 	wal.mu.Lock()
 	defer wal.mu.Unlock()
 
@@ -84,20 +93,20 @@ func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
 	checksumBuf := make([]byte, checksumWidth)
 	binary.BigEndian.PutUint32(checksumBuf, checksum)
 
-	if _, err = wal.buf.Write(lenBuf); err != nil {
-		return
-	}
+	// Instead of invoking 3 different Write calls for 3 different data we are combining them and writing at once.
+	// This reduces the cases of errors.
+	recordLen := lenWidth + checksumWidth + len(msg)
+	record := make([]byte, recordLen)
+	copy(record[0:], lenBuf)
+	copy(record[lenWidth:], checksumBuf)
+	copy(record[lenWidth+checksumWidth:], msg)
 
-	if _, err = wal.buf.Write(checksumBuf); err != nil {
-		return
-	}
-
-	n, err = wal.buf.Write(msg)
+	bytesWritten, err := writeFull(wal.buf, record)
 	if err != nil {
-		return
+		return 0, 0, err
 	}
 
-	if uint64(n) != msgLen {
+	if uint64(bytesWritten) != uint64(recordLen) {
 		err = errors.New("unable to write to wal")
 		return
 	}
@@ -171,4 +180,20 @@ func (s *logStore) Close() error {
 	}
 
 	return s.f.Close()
+}
+
+func writeFull(w io.Writer, data []byte) (int, error) {
+	var bytesWritten int
+
+	for len(data) > 0 {
+		n, err := w.Write(data)
+		bytesWritten += n
+		if err != nil {
+			return bytesWritten, err
+		}
+
+		data = data[n:]
+	}
+
+	return bytesWritten, nil
 }
