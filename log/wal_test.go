@@ -18,6 +18,7 @@ func TestWAL_AppendAndRead(t *testing.T) {
 		[]byte("hello"),
 		[]byte("world"),
 		[]byte("wal"),
+		[]byte("sushant"),
 	}
 
 	var offsets []uint64
