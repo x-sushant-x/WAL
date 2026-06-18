@@ -50,6 +50,11 @@ func newSegment(baseOff uint64, dir string) (*segment, error) {
 	return s, nil
 }
 
+/*
+ * Base Offset = 100
+ * Next Offset = 101
+ * Relative Offset = (101 - 100) = 1
+ */
 func (s *segment) Append(msg []byte) (offset uint64, err error) {
 	offset = s.nextOff
 

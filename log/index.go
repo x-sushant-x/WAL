@@ -4,10 +4,6 @@
  *
  * Whenever a read request comes WAL can query index and index will give exact position where the requested message is stored.
  * This elimiate the need of traversing the whole log file.
- *
- * TODO:
- * 1. Handle Partial Reads & Writes.
- * 2. Handle error roleback.
  */
 
 package log

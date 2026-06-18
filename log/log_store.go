@@ -1,11 +1,6 @@
 /*
  * This code is responsible for writing data to log files in following format:
  * [length][checksum][data]
- *
- * TODO:
- * 1. Handle Partial Reads & Writes.
- * 2. Handle error roleback.
- * 3. If lenbuf is curroupted huge amount of memory can be allocated. Add some cap.
  */
 
 package log
@@ -21,7 +16,7 @@ import (
 )
 
 const (
-	lenWidth       = 8
+	lenWidth       = 4
 	checksumWidth  = 4
 	messageMaxSize = 1000000 // Bytes
 )
@@ -62,23 +57,23 @@ func newLogStore(file *os.File) (*logStore, error) {
  * 2. Generate and store a checksum from the combination of msgLen + msg.
  * 3. Store data into log file in following format: [length][checksum][data]
  */
-func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
+func (store *logStore) Append(msg []byte) (totalBytesWritten int, pos uint64, err error) {
 	if len(msg) > messageMaxSize {
 		return 0, 0, errMessageMaxSizeBreached
 	}
 
-	wal.mu.Lock()
-	defer wal.mu.Unlock()
+	store.mu.Lock()
+	defer store.mu.Unlock()
 
 	/*
 	 * pos tells the position at which current entry is being appended in log file.
 	 * This is later sent to index module which maintain the indexing of each entry for optimized lookup while reading.
 	 */
-	pos = wal.size
+	pos = store.size
 
-	msgLen := uint64(len(msg))
+	msgLen := uint32(len(msg))
 	lenBuf := make([]byte, lenWidth)
-	enc.PutUint64(lenBuf, msgLen)
+	enc.PutUint32(lenBuf, msgLen)
 
 	/*
 	 * We are using CRC32 for checksum because:
@@ -101,7 +96,7 @@ func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
 	copy(record[lenWidth:], checksumBuf)
 	copy(record[lenWidth+checksumWidth:], msg)
 
-	bytesWritten, err := writeFull(wal.buf, record)
+	bytesWritten, err := writeFull(store.buf, record)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -111,8 +106,8 @@ func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
 		return
 	}
 
-	totalBytesWritten := lenWidth + checksumWidth + len(msg)
-	wal.size += uint64(totalBytesWritten)
+	totalBytesWritten = lenWidth + checksumWidth + len(msg)
+	store.size += uint64(totalBytesWritten)
 
 	return
 }
@@ -126,34 +121,34 @@ func (wal *logStore) Append(msg []byte) (n int, pos uint64, err error) {
  * 5. Generate a checksum with length + message.
  * 6. Compare if generated checksum and stored checksum is equal or not.
  */
-func (wal *logStore) Read(posToRead uint64) ([]byte, error) {
-	wal.mu.Lock()
-	defer wal.mu.Unlock()
+func (store *logStore) Read(posToRead uint64) ([]byte, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 
-	if err := wal.buf.Flush(); err != nil {
+	if err := store.buf.Flush(); err != nil {
 		return nil, err
 	}
 
 	lenBuf := make([]byte, lenWidth)
 
-	_, err := wal.f.ReadAt(lenBuf, int64(posToRead))
+	_, err := store.f.ReadAt(lenBuf, int64(posToRead))
 	if err != nil {
 		return nil, err
 	}
 
 	checksumBuf := make([]byte, checksumWidth)
 
-	_, err = wal.f.ReadAt(checksumBuf, lenWidth+int64(posToRead))
+	_, err = store.f.ReadAt(checksumBuf, int64(posToRead)+lenWidth)
 	if err != nil {
 		return nil, err
 	}
 
 	expectedChecksum := enc.Uint32(checksumBuf)
 
-	dataLen := enc.Uint64(lenBuf)
+	dataLen := enc.Uint32(lenBuf)
 	data := make([]byte, dataLen)
 
-	_, err = wal.f.ReadAt(data, int64(posToRead)+lenWidth+checksumWidth)
+	_, err = store.f.ReadAt(data, int64(posToRead)+lenWidth+checksumWidth)
 	if err != nil {
 		return nil, err
 	}
@@ -171,15 +166,15 @@ func (wal *logStore) Read(posToRead uint64) ([]byte, error) {
 	return data, err
 }
 
-func (s *logStore) Close() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (store *logStore) Close() error {
+	store.mu.Lock()
+	defer store.mu.Unlock()
 
-	if err := s.buf.Flush(); err != nil {
+	if err := store.buf.Flush(); err != nil {
 		return err
 	}
 
-	return s.f.Close()
+	return store.f.Close()
 }
 
 func writeFull(w io.Writer, data []byte) (int, error) {

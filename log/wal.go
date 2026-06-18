@@ -3,7 +3,7 @@ package log
 import (
 	"fmt"
 	"os"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -33,8 +33,8 @@ func NewWAL(dir string) (*WAL, error) {
 	var baseOffsets []uint64
 
 	for _, f := range files {
-		if strings.HasSuffix(f.Name(), ".store") {
-			base := strings.TrimSuffix(f.Name(), ".store")
+		if before, ok := strings.CutSuffix(f.Name(), ".store"); ok {
+			base := before
 			off, err := strconv.ParseUint(base, 10, 64)
 			if err != nil {
 				return nil, err
@@ -43,9 +43,7 @@ func NewWAL(dir string) (*WAL, error) {
 		}
 	}
 
-	sort.Slice(baseOffsets, func(i, j int) bool {
-		return baseOffsets[i] < baseOffsets[j]
-	})
+	slices.Sort(baseOffsets)
 
 	for _, base := range baseOffsets {
 		seg, err := newSegment(base, dir)
