@@ -2,6 +2,9 @@
 
 A Write Ahead Log System written in Golang. WAL is a foundational module where any changes to a system’s state are recorded in a persistent, append-only log before they are applied to the main data store or database.
 
+> [!WARNING]
+> I built this project for learning. It is not built with intention for production use.
+
 WALs are used in:
 
 - Databases
@@ -45,5 +48,4 @@ All the writes goes to active segment and for reads WAL finds which segment have
 When active segment reaches it's max file size (max store file size) a new segment is created and marked as active.
 
 
-> [!WARNING]
-> I built this project for learning. Do not use it for any production use.
+
